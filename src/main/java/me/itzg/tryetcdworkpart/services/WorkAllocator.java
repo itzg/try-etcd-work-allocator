@@ -72,6 +72,8 @@ public class WorkAllocator implements SmartLifecycle {
     this.prefix = properties.getPrefix().endsWith("/") ?
         properties.getPrefix() :
         properties.getPrefix() + "/";
+
+    log.info("Using prefix={}", this.prefix);
   }
 
   @Override

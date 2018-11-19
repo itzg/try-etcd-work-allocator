@@ -87,7 +87,7 @@ public class WorkAllocator implements SmartLifecycle {
   @Override
   public void start() {
     ourId = UUID.randomUUID().toString();
-    log.info("We are worker={}", ourId);
+    log.info("I am worker={}", ourId);
 
     running = true;
 
@@ -158,7 +158,7 @@ public class WorkAllocator implements SmartLifecycle {
         } catch (InterruptedException e) {
           log.info("Interrupted while watching {}", prefix);
         } catch (Exception e) {
-          log.warn("Failed while watching active", e);
+          log.warn("Failed while watching {}", prefix , e);
           return;
         }
       }
@@ -238,24 +238,25 @@ public class WorkAllocator implements SmartLifecycle {
           }
 
           buildWatcher(
-              prefix + REGISTRY_SET, getResponse.getHeader().getRevision(), watchResponse -> {
+              prefix + REGISTRY_SET,
+              getResponse.getHeader().getRevision(),
+              watchResponse -> {
                 log.debug("Saw registry event={}", watchResponse);
 
                 for (WatchEvent event : watchResponse.getEvents()) {
-                  // is new work?
                   if (isNewKeyEvent(event)) {
                     handleReadyWork(WorkTransition.NEW, event.getKeyValue());
                   } else if (isUpdateKeyEvent(event)) {
-                    handleWorkUpdate(event.getKeyValue());
+                    handleRegisteredWorkUpdate(event.getKeyValue());
                   } else if (isDeleteKeyEvent(event)) {
-                    handleWorkDelete(event.getPrevKV());
+                    handleRegisteredWorkDeletion(event.getPrevKV());
                   }
                 }
               });
         });
   }
 
-  private void handleWorkUpdate(KeyValue kv) {
+  private void handleRegisteredWorkUpdate(KeyValue kv) {
     final String workId = extractIdFromKey(kv);
 
     if (ourWork.contains(workId)) {
@@ -264,7 +265,7 @@ public class WorkAllocator implements SmartLifecycle {
     }
   }
 
-  private void handleWorkDelete(KeyValue kv) {
+  private void handleRegisteredWorkDeletion(KeyValue kv) {
     final String workId = extractIdFromKey(kv);
 
     if (ourWork.remove(workId)) {
@@ -272,12 +273,14 @@ public class WorkAllocator implements SmartLifecycle {
       processor.stop(workId, kv.getValue().toStringUtf8());
     }
 
-    // Checking etcd content is purposely separate from the work list we're tracking in case they
-    // diverged somehow.
+    // Checking etcd content is purposely separate from the tracking in ourWork to reconcile
+    // any divergence between our own state and etcd's state.
     final ByteSequence activeKeyBytes = fromString(prefix + ACTIVE_SET + workId);
     final ByteSequence ourIdBytes = fromString(ourId);
     etcd.getKVClient().txn()
+        // if the active work item is ours
         .If(new Cmp(activeKeyBytes, Cmp.Op.EQUAL, CmpTarget.value(ourIdBytes)))
+        // ...then delete it
         .Then(
             Op.delete(activeKeyBytes, DeleteOption.DEFAULT)
         )
@@ -319,6 +322,9 @@ public class WorkAllocator implements SmartLifecycle {
           if (amountToShed > 0) {
             log.info("Shedding work to rebalance count={}", amountToShed);
             for (; amountToShed > 0; --amountToShed) {
+
+              // give preference to shedding most recently assigned work items with the theory
+              // that we'll minimize churn of long held work items
               final String workIdToShed = ourWork.pop();
               releaseWork(workIdToShed);
             }
@@ -350,8 +356,7 @@ public class WorkAllocator implements SmartLifecycle {
         })
 
         // adjust our work load
-        .thenCompose(deleteResponse -> decWorkLoad()
-        )
+        .thenCompose(deleteResponse -> decWorkLoad())
         .exceptionally(throwable -> {
           log.warn("Failure while releasing work={}", workIdToShed, throwable);
           return null;
@@ -373,12 +378,14 @@ public class WorkAllocator implements SmartLifecycle {
 
   private void handleReadyWork(WorkTransition transition, KeyValue kv) {
     final String workId = Bits.extractIdFromKey(kv);
-    log.info("Handling potential readyWork={} at transition={}", workId, transition);
+    log.info("Handling potential readyWork={} due to transition={}", workId, transition);
 
     amILeastLoaded()
         .thenAccept(leastLoaded -> {
           if (leastLoaded) {
             log.info("I am least loaded, so I'll try to grab work={}", workId);
+            // NOTE: we can't pass the value from kv here since we might have only seen
+            // an active entry deletion where all we know is workId
             grabWork(workId);
           }
         });
@@ -438,6 +445,9 @@ public class WorkAllocator implements SmartLifecycle {
   }
 
   private CompletableFuture<Boolean> amILeastLoaded() {
+    // Because of the zero-padded formatting of the work load value stored in each worker entry,
+    // we can find the least loaded worker via etcd by doing an ASCII sort of the values and picking
+    // off the lowest value.
     return etcd.getKVClient()
         .get(
             fromString(prefix + WORKERS_SET),
@@ -460,7 +470,8 @@ public class WorkAllocator implements SmartLifecycle {
           final String leastLoadedId = Bits.extractIdFromKey(kv);
           final boolean leastLoaded = ourId.equals(leastLoadedId);
           log.info(
-              "I am leastLoaded={} out of workerCount={}", leastLoaded, getResponse.getCount());
+              "I am leastLoaded={} out of workerCount={}",
+              leastLoaded, getResponse.getCount());
           return leastLoaded;
         });
   }

@@ -1,10 +1,6 @@
 package me.itzg.tryetcdworkpart.web;
 
-import com.coreos.jetcd.Client;
-import com.coreos.jetcd.data.ByteSequence;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import me.itzg.tryetcdworkpart.Bits;
 import me.itzg.tryetcdworkpart.Work;
 import me.itzg.tryetcdworkpart.services.WorkAllocator;
 import org.springframework.beans.factory.annotation.Autowired;

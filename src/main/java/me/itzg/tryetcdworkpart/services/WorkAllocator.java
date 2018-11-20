@@ -2,7 +2,6 @@ package me.itzg.tryetcdworkpart.services;
 
 import static com.coreos.jetcd.data.ByteSequence.fromString;
 import static com.coreos.jetcd.op.Op.delete;
-import static com.coreos.jetcd.op.Op.get;
 import static com.coreos.jetcd.op.Op.put;
 import static me.itzg.tryetcdworkpart.Bits.ACTIVE_SET;
 import static me.itzg.tryetcdworkpart.Bits.REGISTRY_SET;

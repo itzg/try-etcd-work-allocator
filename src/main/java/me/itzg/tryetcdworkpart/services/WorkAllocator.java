@@ -2,6 +2,7 @@ package me.itzg.tryetcdworkpart.services;
 
 import static com.coreos.jetcd.data.ByteSequence.fromString;
 import static com.coreos.jetcd.op.Op.delete;
+import static com.coreos.jetcd.op.Op.get;
 import static com.coreos.jetcd.op.Op.put;
 import static me.itzg.tryetcdworkpart.Bits.ACTIVE_SET;
 import static me.itzg.tryetcdworkpart.Bits.REGISTRY_SET;
@@ -30,11 +31,13 @@ import com.coreos.jetcd.options.PutOption;
 import com.coreos.jetcd.options.WatchOption;
 import com.coreos.jetcd.watch.WatchEvent;
 import com.coreos.jetcd.watch.WatchResponse;
+import java.time.Instant;
 import java.util.Deque;
 import java.util.Iterator;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -45,7 +48,7 @@ import me.itzg.tryetcdworkpart.WorkProcessor;
 import me.itzg.tryetcdworkpart.config.WorkerProperties;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.SmartLifecycle;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -55,7 +58,7 @@ public class WorkAllocator implements SmartLifecycle {
   private final WorkerProperties properties;
   private final Client etcd;
   private final WorkProcessor processor;
-  private final ThreadPoolTaskExecutor executorService;
+  private final ThreadPoolTaskScheduler taskScheduler;
   private final String prefix;
   private String ourId;
   private long leaseId;
@@ -63,14 +66,16 @@ public class WorkAllocator implements SmartLifecycle {
   private Semaphore workChangeSem = new Semaphore(1);
   private boolean running;
   private Deque<String> ourWork = new ConcurrentLinkedDeque<>();
+  private ScheduledFuture<?> schedule;
+  private ScheduledFuture<?> scheduledRebalance;
 
   @Autowired
   public WorkAllocator(WorkerProperties properties, Client etcd, WorkProcessor processor,
-      ThreadPoolTaskExecutor executorService) {
+      ThreadPoolTaskScheduler taskScheduler) {
     this.properties = properties;
     this.etcd = etcd;
     this.processor = processor;
-    this.executorService = executorService;
+    this.taskScheduler = taskScheduler;
 
     this.prefix = properties.getPrefix().endsWith("/") ?
         properties.getPrefix() :
@@ -104,26 +109,35 @@ public class WorkAllocator implements SmartLifecycle {
           etcd.getLeaseClient().keepAlive(leaseId);
           return leaseId;
         })
-        .thenAccept(leaseId ->
+        .thenCompose(leaseId ->
             initOurWorkerEntry()
-                .thenAccept(ignored -> {
+                .thenCompose(ignored -> {
                   log.info("Starting up watchers");
-                  watchRegistry();
-                  watchActive();
-                  watchWorkers();
+                  return watchRegistry()
+                      .thenAccept(o -> {
+                        watchActive();
+                        watchWorkers();
+                      });
                 }))
         .join();
   }
 
   @Override
   public void stop() {
-    stop(() -> {
-    });
+    stop(() -> {});
   }
 
   @Override
   public void stop(Runnable callback) {
+    if (!running) {
+      callback.run();
+      return;
+    }
+
     running = false;
+    if (scheduledRebalance != null) {
+      scheduledRebalance.cancel(false);
+    }
 
     final Iterator<String> it = ourWork.iterator();
     while (it.hasNext()) {
@@ -139,7 +153,7 @@ public class WorkAllocator implements SmartLifecycle {
 
     etcd.getLeaseClient()
         .revoke(leaseId)
-        .thenAccept(leaseRevokeResponse -> {
+        .thenAccept(resp -> {
           callback.run();
         });
   }
@@ -171,7 +185,7 @@ public class WorkAllocator implements SmartLifecycle {
                 .build()
         );
 
-    executorService.submit(() -> {
+    taskScheduler.submit(() -> {
       log.info("Watching {}", prefix);
       while (running) {
         try {
@@ -241,15 +255,17 @@ public class WorkAllocator implements SmartLifecycle {
 
       for (WatchEvent event : watchResponse.getEvents()) {
         if (Bits.isDeleteKeyEvent(event)) {
-          final KeyValue kv = event.getPrevKV();
+          // IMPORTANT can't use the previous KV here since the mod revision won't reflect the
+          // revision of deletion.
+          final KeyValue kv = event.getKeyValue();
           handleReadyWork(WorkTransition.RELEASED, kv);
         }
       }
     });
   }
 
-  private void watchRegistry() {
-    etcd.getKVClient()
+  private CompletableFuture<?> watchRegistry() {
+    return etcd.getKVClient()
         .get(
             fromString(prefix + REGISTRY_SET),
             GetOption.newBuilder()
@@ -306,7 +322,7 @@ public class WorkAllocator implements SmartLifecycle {
 
     } else {
       log.info("Active work={} key was not present or not ours", workId);
-      rebalanceWorkLoad();
+      scheduleRebalance();
     }
 
   }
@@ -323,9 +339,19 @@ public class WorkAllocator implements SmartLifecycle {
         }
       }
       if (rebalance) {
-        rebalanceWorkLoad();
+        scheduleRebalance();
       }
     });
+  }
+
+  private void scheduleRebalance() {
+    if (scheduledRebalance != null) {
+      scheduledRebalance.cancel(false);
+    }
+    scheduledRebalance = taskScheduler.schedule(
+        this::rebalanceWorkLoad,
+        Instant.now().plus(properties.getRebalanceDelay())
+    );
   }
 
   private CompletableFuture<?> rebalanceWorkLoad() {
@@ -423,12 +449,15 @@ public class WorkAllocator implements SmartLifecycle {
 
   private void handleReadyWork(WorkTransition transition, KeyValue kv) {
     final String workId = Bits.extractIdFromKey(kv);
-    log.info("Handling potential readyWork={} due to transition={}", workId, transition);
+    final long revision = kv.getModRevision();
 
-    amILeastLoaded(kv.getModRevision())
+    log.info("Observed readyWork={} cause={} rev={} allocator={}",
+        workId, transition, revision, ourId);
+
+    amILeastLoaded(revision)
         .thenAccept(leastLoaded -> {
           if (leastLoaded) {
-            log.info("I am least loaded, so I'll try to grab work={}", workId);
+            log.info("Least loaded, so trying to grab work={}, allocator={}", workId, ourId);
             // NOTE: we can't pass the value from kv here since we might have only seen
             // an active entry deletion where all we know is workId
             try {
@@ -484,7 +513,7 @@ public class WorkAllocator implements SmartLifecycle {
           }
 
           if (txnResponse.isSucceeded()) {
-            log.info("Successfully grabbed work={}", workId);
+            log.info("Successfully grabbed work={}, allocator={}", workId, ourId);
             return true;
           } else {
             workLoad.decrementAndGet();
@@ -493,6 +522,10 @@ public class WorkAllocator implements SmartLifecycle {
         })
         .thenCompose(success -> {
           if (success) {
+
+            // ensure a flood of work items wasn't all picked up by us
+            scheduleRebalance();
+
             return getWorkContent(workId)
                 .thenAccept(content -> processGrabbedWork(workId, content))
                 .exceptionally(throwable -> {

@@ -16,6 +16,9 @@ public class WorkerProperties {
   @DurationUnit(ChronoUnit.SECONDS)
   Duration leaseDuration = Duration.ofSeconds(5);
 
+  @DurationUnit(ChronoUnit.SECONDS)
+  Duration rebalanceDelay = Duration.ofSeconds(1);
+
   @NotEmpty
   String prefix = "/work/";
 }

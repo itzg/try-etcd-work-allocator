@@ -14,6 +14,7 @@ import com.coreos.jetcd.data.KeyValue;
 import com.coreos.jetcd.options.GetOption;
 import io.etcd.jetcd.launcher.junit.EtcdClusterResource;
 import java.net.URI;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -21,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
@@ -43,13 +45,10 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
-@RunWith(MockitoJUnitRunner.class)
 @Slf4j
 public class WorkAllocatorTest {
-
-  @Mock
-  private WorkProcessor workProcessor;
 
   @Rule
   public final EtcdClusterResource etcd = new EtcdClusterResource("test-etcd", 1);
@@ -57,14 +56,14 @@ public class WorkAllocatorTest {
   @Rule
   public TestName testName = new TestName();
 
-  private ThreadPoolTaskExecutor taskExecutor;
+  private ThreadPoolTaskScheduler taskExecutor;
   private WorkerProperties workerProperties;
   private Client client;
 
   @Before
   public void setUp() throws Exception {
-    taskExecutor = new ThreadPoolTaskExecutor();
-    taskExecutor.setQueueCapacity(0);
+    taskExecutor = new ThreadPoolTaskScheduler();
+    taskExecutor.setPoolSize(Integer.MAX_VALUE);
     taskExecutor.setThreadNamePrefix("watchers-");
     taskExecutor.initialize();
 
@@ -84,17 +83,16 @@ public class WorkAllocatorTest {
   }
 
   @Test
-  public void testSingleWorkItemSingleWorker() {
+  public void testSingleWorkItemSingleWorker() throws InterruptedException {
+    final BulkWorkProcessor workProcessor = new BulkWorkProcessor(1);
     final WorkAllocator workAllocator = new WorkAllocator(
         workerProperties, client, workProcessor, taskExecutor);
     workAllocator.start();
 
-    workAllocator.createWork("testing=one")
+    workAllocator.createWork("1")
     .join();
 
-    verify(workProcessor, timeout(5000).atLeastOnce())
-        .start(anyString(), eq("testing=one"));
-    verifyNoMoreInteractions(workProcessor);
+    workProcessor.hasActiveWorkItems(1, 1000);
   }
 
   @Test
@@ -149,6 +147,89 @@ public class WorkAllocatorTest {
 
     } finally {
       workAllocator.stop();
+    }
+  }
+
+  @Test
+  public void testOneWorkerJoinedByAnother() throws ExecutionException, InterruptedException {
+    final int totalWorkItems = 6;
+
+    // rebalance delay needs to be comfortably within the hasActiveWorkItems timeouts used below
+    workerProperties.setRebalanceDelay(Duration.ofMillis(500));
+
+    final BulkWorkProcessor workProcessor1 = new BulkWorkProcessor(totalWorkItems);
+    final WorkAllocator workAllocator1 = new WorkAllocator(
+        workerProperties, client, workProcessor1, taskExecutor);
+
+    final BulkWorkProcessor workProcessor2 = new BulkWorkProcessor(totalWorkItems);
+    final WorkAllocator workAllocator2 = new WorkAllocator(
+        workerProperties, client, workProcessor2, taskExecutor);
+
+    try {
+      final List<Work> createdWork = new ArrayList<>();
+      for (int i = 0; i < totalWorkItems; i++) {
+        createdWork.add(
+            workAllocator1.createWork(String.format("%d", i)).get()
+        );
+      }
+
+      workAllocator1.start();
+      workProcessor1.hasActiveWorkItems(totalWorkItems, 1000);
+
+      workAllocator2.start();
+      workProcessor1.hasActiveWorkItems(totalWorkItems/2, 1000);
+      workProcessor2.hasActiveWorkItems(totalWorkItems/2, 1000);
+
+    }
+    finally {
+      workAllocator1.stop();
+      workAllocator2.stop();
+    }
+  }
+
+  @Test
+  public void testTwoWorkersReleasedToOne() throws InterruptedException, ExecutionException {
+    final int totalWorkItems = 6;
+
+    workerProperties.setRebalanceDelay(Duration.ofMillis(500));
+
+    final BulkWorkProcessor workProcessor1 = new BulkWorkProcessor(totalWorkItems);
+    final WorkAllocator workAllocator1 = new WorkAllocator(
+        workerProperties, client, workProcessor1, taskExecutor);
+    workAllocator1.start();
+
+    final BulkWorkProcessor workProcessor2 = new BulkWorkProcessor(totalWorkItems);
+    final WorkAllocator workAllocator2 = new WorkAllocator(
+        workerProperties, client, workProcessor2, taskExecutor);
+    workAllocator2.start();
+
+    // both are started and ready to accept newly created worked items
+
+    try {
+      final List<Work> createdWork = new ArrayList<>();
+      for (int i = 0; i < totalWorkItems; i++) {
+        createdWork.add(
+            workAllocator1.createWork(String.format("%d", i)).get()
+        );
+      }
+
+      // first verify even load across the two
+      workProcessor1.hasActiveWorkItems(totalWorkItems/2, 1000);
+      workProcessor2.hasActiveWorkItems(totalWorkItems/2, 1000);
+
+      log.info("stopping allocator 2");
+      final Semaphore stopped = new Semaphore(0);
+      workAllocator2.stop(() -> {
+        stopped.release();
+      });
+
+      stopped.acquire();
+      workProcessor1.hasActiveWorkItems(totalWorkItems, 1000);
+      workProcessor2.hasActiveWorkItems(0, 1000);
+    }
+    finally {
+      workAllocator1.stop();
+      workAllocator2.stop();
     }
   }
 
@@ -275,9 +356,13 @@ public class WorkAllocatorTest {
     }
 
     public void hasActiveWorkItems(int expected, long timeout) throws InterruptedException {
+      final long start = System.currentTimeMillis();
       lock.lock();
       try {
         while (activeWorkItems != expected) {
+          if (System.currentTimeMillis() - start > timeout) {
+            Assert.fail(String.format("hasActiveWorkItems failed to see in time %d, had %d", expected, activeWorkItems));
+          }
           activeItemsCondition.await(timeout, TimeUnit.MILLISECONDS);
         }
       } finally {

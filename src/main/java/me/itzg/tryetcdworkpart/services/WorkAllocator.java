@@ -381,7 +381,9 @@ public class WorkAllocator implements SmartLifecycle {
     return getCountAtPrefix(prefix + WORKERS_SET)
         .thenCompose(workersCount ->
             getCountAtPrefix(prefix + REGISTRY_SET)
-                .thenApply(workCount -> workCount / workersCount));
+                .thenApply(workCount ->
+                    (long)Math.ceil((double)workCount / workersCount)
+                ));
   }
 
   private CompletableFuture<Boolean> releaseWork(String workId, String releasedContent)

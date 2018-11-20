@@ -179,6 +179,70 @@ public class WorkAllocatorTest {
   }
 
   @Test
+  public void testRebalanceRounding() throws ExecutionException, InterruptedException {
+    final int totalWorkItems = 4;
+
+    // rebalance delay needs to be comfortably within the hasActiveWorkItems timeouts used below
+    workerProperties.setRebalanceDelay(Duration.ofMillis(500));
+
+    final BulkWorkProcessor workProcessor1 = new BulkWorkProcessor(totalWorkItems);
+    final WorkAllocator workAllocator1 = new WorkAllocator(
+        workerProperties, client, workProcessor1, taskExecutor);
+
+    final BulkWorkProcessor workProcessor2 = new BulkWorkProcessor(totalWorkItems);
+    final WorkAllocator workAllocator2 = new WorkAllocator(
+        workerProperties, client, workProcessor2, taskExecutor);
+
+    final BulkWorkProcessor workProcessor3 = new BulkWorkProcessor(totalWorkItems);
+    final WorkAllocator workAllocator3 = new WorkAllocator(
+        workerProperties, client, workProcessor3, taskExecutor);
+
+    final BulkWorkProcessor workProcessor4 = new BulkWorkProcessor(totalWorkItems);
+    final WorkAllocator workAllocator4 = new WorkAllocator(
+        workerProperties, client, workProcessor4, taskExecutor);
+
+    try {
+      final List<Work> createdWork = new ArrayList<>();
+      for (int i = 0; i < totalWorkItems; i++) {
+        createdWork.add(
+            workAllocator1.createWork(String.format("%d", i)).get()
+        );
+      }
+
+      workAllocator1.start();
+      workProcessor1.hasActiveWorkItems(totalWorkItems, 1000);
+
+      log.info("starting second allocator");
+      workAllocator2.start();
+      workProcessor1.hasActiveWorkItems(totalWorkItems/2, 1000);
+      workProcessor2.hasActiveWorkItems(totalWorkItems/2, 1000);
+
+      log.info("starting third allocator");
+      workAllocator3.start();
+      // wait past rebalance to ensure load balance of 1.3333 is rounded to 2
+      Thread.sleep(600);
+      // The expected balancing looks uneven here, but it's because the work load has a rounding-up
+      // tolerance to avoid the one work item, in this case, from flip-flopping between the allocators
+      workProcessor1.hasActiveWorkItems(2, 1000);
+      workProcessor2.hasActiveWorkItems(2, 1000);
+      workProcessor3.hasActiveWorkItems(0, 1000);
+
+      log.info("adding new work for third to pickup");
+      createdWork.add(
+          workAllocator1.createWork(String.format("%d", totalWorkItems+1)).get()
+      );
+      workProcessor3.hasActiveWorkItems(1, 1000);
+      workProcessor1.hasActiveWorkItems(2, 1000);
+      workProcessor2.hasActiveWorkItems(2, 1000);
+    }
+    finally {
+      workAllocator1.stop();
+      workAllocator2.stop();
+      workAllocator3.start();
+    }
+  }
+
+  @Test
   public void testTwoWorkersReleasedToOne() throws InterruptedException, ExecutionException {
     final int totalWorkItems = 6;
 
@@ -351,6 +415,21 @@ public class WorkAllocatorTest {
       lock.lock();
       try {
         while (activeWorkItems != expected) {
+          if (System.currentTimeMillis() - start > timeout) {
+            Assert.fail(String.format("hasActiveWorkItems failed to see in time %d, had %d", expected, activeWorkItems));
+          }
+          activeItemsCondition.await(timeout, TimeUnit.MILLISECONDS);
+        }
+      } finally {
+        lock.unlock();
+      }
+    }
+
+    public void hasAtLeastWorkItems(int expected, long timeout) throws InterruptedException {
+      final long start = System.currentTimeMillis();
+      lock.lock();
+      try {
+        while (activeWorkItems < expected) {
           if (System.currentTimeMillis() - start > timeout) {
             Assert.fail(String.format("hasActiveWorkItems failed to see in time %d, had %d", expected, activeWorkItems));
           }

@@ -2,11 +2,18 @@ package me.itzg.tryetcdworkpart.services;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertTrue;
 
 import com.coreos.jetcd.Client;
 import com.coreos.jetcd.data.ByteSequence;
 import com.coreos.jetcd.data.KeyValue;
+import com.coreos.jetcd.kv.GetResponse;
+import com.coreos.jetcd.kv.TxnResponse;
+import com.coreos.jetcd.op.Cmp;
+import com.coreos.jetcd.op.CmpTarget;
+import com.coreos.jetcd.op.Op;
 import com.coreos.jetcd.options.GetOption;
+import com.coreos.jetcd.options.PutOption;
 import io.etcd.jetcd.launcher.junit.EtcdClusterResource;
 import java.net.URI;
 import java.time.Duration;
@@ -364,6 +371,28 @@ public class WorkAllocatorTest {
     for (WorkAllocator workAllocator : workAllocators) {
       workAllocator.stop();
     }
+  }
+
+  @Test
+  public void testVersionZeroAssumption() throws ExecutionException, InterruptedException {
+    final ByteSequence resultKey = ByteSequence.fromString("/result");
+    final TxnResponse resp = client.getKVClient().txn()
+        .If(new Cmp(ByteSequence.fromString("/doesnotexist"), Cmp.Op.EQUAL, CmpTarget.version(0)))
+        .Then(Op.put(resultKey, ByteSequence.fromString("success"),
+            PutOption.DEFAULT
+        ))
+        .commit()
+        .get();
+
+    assertTrue(resp.isSucceeded());
+
+    final GetResponse getResponse = client.getKVClient().get(resultKey)
+        .get();
+
+    assertEquals(
+        "success",
+        getResponse.getKvs().get(0).getValue().toStringUtf8()
+    );
   }
 
   static class WorkItemSummary {

@@ -400,8 +400,6 @@ public class WorkAllocator implements SmartLifecycle {
     log.info("Releasing work={}", workId);
 
     return etcd.getKVClient().txn()
-        // simple existence condition to trigger transaction
-        .If(new Cmp(activeKeyBytes, Cmp.Op.GREATER, CmpTarget.version(0)))
         .Then(
             // store decremented work load
             put(

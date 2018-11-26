@@ -395,6 +395,27 @@ public class WorkAllocatorTest {
     );
   }
 
+  @Test
+  public void testAlwaysTrueTxnAssumption() throws ExecutionException, InterruptedException {
+    final ByteSequence resultKey = ByteSequence.fromString("/alwaysTrue");
+    final TxnResponse resp = client.getKVClient().txn()
+        .Then(Op.put(resultKey, ByteSequence.fromString("true"),
+            PutOption.DEFAULT
+        ))
+        .commit()
+        .get();
+
+    assertTrue(resp.isSucceeded());
+
+    final GetResponse getResponse = client.getKVClient().get(resultKey)
+        .get();
+
+    assertEquals(
+        "true",
+        getResponse.getKvs().get(0).getValue().toStringUtf8()
+    );
+  }
+
   static class WorkItemSummary {
     HashSet<String> activeWorkIds = new HashSet<>();
     Map<String, Integer> workerLoad = new HashMap<>();

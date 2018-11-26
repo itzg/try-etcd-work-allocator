@@ -422,11 +422,15 @@ public class WorkAllocator implements SmartLifecycle {
 
           if (throwable != null) {
             log.warn("Failure while releasing work={}", workId, throwable);
+
+            // NOTE: at this point the stored work load in our stored active key doesn't match
+            // workLoad's value; however, the next successful operation will write the proper
+            // value.
+
             return false;
           } else if (!txnResponse.isSucceeded()) {
             log.warn("Transaction failed during release of work={}", workId);
-            // must restore work load value to remain in sync with stored workload
-            workLoad.incrementAndGet();
+            // same NOTE as previous block
             return false;
           }
           return true;
@@ -515,7 +519,9 @@ public class WorkAllocator implements SmartLifecycle {
             log.info("Successfully grabbed work={}, allocator={}", workId, ourId);
             return true;
           } else {
-            workLoad.decrementAndGet();
+            // NOTE: at this point the stored work load in our stored active key doesn't match
+            // workLoad's value; however, the next successful operation will write the proper
+            // value.
             return false;
           }
         })

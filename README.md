@@ -43,54 +43,46 @@ curl -XPOST -d "testing=four" localhost:$port/work
 
 With those you will see the one allocator instance picked up all the work:
 ```text
-m.i.t.services.WorkAllocator             : Handling potential readyWork=9994249a-0ecb-4735-b078-19ce5c4ee20c at transition=NEW
-m.i.t.services.WorkAllocator             : I'm the only worker
-m.i.t.services.WorkAllocator             : I am least loaded, so I'll try to grab work=9994249a-0ecb-4735-b078-19ce5c4ee20c
-m.i.t.services.WorkAllocator             : Successfully grabbed work=9994249a-0ecb-4735-b078-19ce5c4ee20c
-m.i.t.services.WorkAllocator             : Stored workLoad=1 update
-m.i.t.services.DefaultWorkProcessor      : Starting work on id=9994249a-0ecb-4735-b078-19ce5c4ee20c, content=testing=one
-m.i.t.services.WorkAllocator             : Handling potential readyWork=13de78a9-a1e4-4e9f-9d71-49cb368240fe at transition=NEW
-m.i.t.services.WorkAllocator             : I'm the only worker
-m.i.t.services.WorkAllocator             : I am least loaded, so I'll try to grab work=13de78a9-a1e4-4e9f-9d71-49cb368240fe
-m.i.t.services.WorkAllocator             : Successfully grabbed work=13de78a9-a1e4-4e9f-9d71-49cb368240fe
-m.i.t.services.WorkAllocator             : Stored workLoad=2 update
-m.i.t.services.DefaultWorkProcessor      : Starting work on id=13de78a9-a1e4-4e9f-9d71-49cb368240fe, content=testing=two
-m.i.t.services.WorkAllocator             : Handling potential readyWork=c6574ad8-7a3f-48e2-8c33-7fdedef6d20e at transition=NEW
-m.i.t.services.WorkAllocator             : I'm the only worker
-m.i.t.services.WorkAllocator             : I am least loaded, so I'll try to grab work=c6574ad8-7a3f-48e2-8c33-7fdedef6d20e
-m.i.t.services.WorkAllocator             : Successfully grabbed work=c6574ad8-7a3f-48e2-8c33-7fdedef6d20e
-m.i.t.services.WorkAllocator             : Stored workLoad=3 update
-m.i.t.services.DefaultWorkProcessor      : Starting work on id=c6574ad8-7a3f-48e2-8c33-7fdedef6d20e, content=testing=three
-m.i.t.services.WorkAllocator             : Handling potential readyWork=dff30574-fca6-45a0-a0dd-db36142b1e8e at transition=NEW
-m.i.t.services.WorkAllocator             : I'm the only worker
-m.i.t.services.WorkAllocator             : I am least loaded, so I'll try to grab work=dff30574-fca6-45a0-a0dd-db36142b1e8e
-m.i.t.services.WorkAllocator             : Successfully grabbed work=dff30574-fca6-45a0-a0dd-db36142b1e8e
-m.i.t.services.WorkAllocator             : Stored workLoad=4 update
-m.i.t.services.DefaultWorkProcessor      : Starting work on id=dff30574-fca6-45a0-a0dd-db36142b1e8e, content=testing=four
+m.i.t.services.WorkAllocator             : Observed readyWork=7bbfeb10-e644-417e-acd2-7edbfca26d89 cause=NEW rev=2024 allocator=41f6235a-0b82-4567-8a47-c7885387adda
+m.i.t.services.WorkAllocator             : Least loaded, so trying to grab work=7bbfeb10-e644-417e-acd2-7edbfca26d89, allocator=41f6235a-0b82-4567-8a47-c7885387adda
+m.i.t.services.WorkAllocator             : Successfully grabbed work=7bbfeb10-e644-417e-acd2-7edbfca26d89, allocator=41f6235a-0b82-4567-8a47-c7885387adda
+m.i.t.services.DefaultWorkProcessor      : Starting work on id=7bbfeb10-e644-417e-acd2-7edbfca26d89, content=testing=one
+m.i.t.services.WorkAllocator             : Observed readyWork=fcd8a04d-5698-40f2-b4d9-a6714b15aa5b cause=NEW rev=2026 allocator=41f6235a-0b82-4567-8a47-c7885387adda
+m.i.t.services.WorkAllocator             : Least loaded, so trying to grab work=fcd8a04d-5698-40f2-b4d9-a6714b15aa5b, allocator=41f6235a-0b82-4567-8a47-c7885387adda
+m.i.t.services.WorkAllocator             : Successfully grabbed work=fcd8a04d-5698-40f2-b4d9-a6714b15aa5b, allocator=41f6235a-0b82-4567-8a47-c7885387adda
+m.i.t.services.DefaultWorkProcessor      : Starting work on id=fcd8a04d-5698-40f2-b4d9-a6714b15aa5b, content=testing=two
+m.i.t.services.WorkAllocator             : Observed readyWork=2678cda4-5443-48c2-9b8e-6d682ec4959a cause=NEW rev=2028 allocator=41f6235a-0b82-4567-8a47-c7885387adda
+m.i.t.services.WorkAllocator             : Least loaded, so trying to grab work=2678cda4-5443-48c2-9b8e-6d682ec4959a, allocator=41f6235a-0b82-4567-8a47-c7885387adda
+m.i.t.services.WorkAllocator             : Successfully grabbed work=2678cda4-5443-48c2-9b8e-6d682ec4959a, allocator=41f6235a-0b82-4567-8a47-c7885387adda
+m.i.t.services.DefaultWorkProcessor      : Starting work on id=2678cda4-5443-48c2-9b8e-6d682ec4959a, content=testing=three
+m.i.t.services.WorkAllocator             : Observed readyWork=fb555078-6648-4468-afe9-8401c4df1ba7 cause=NEW rev=2030 allocator=41f6235a-0b82-4567-8a47-c7885387adda
+m.i.t.services.WorkAllocator             : Least loaded, so trying to grab work=fb555078-6648-4468-afe9-8401c4df1ba7, allocator=41f6235a-0b82-4567-8a47-c7885387adda
+m.i.t.services.WorkAllocator             : Successfully grabbed work=fb555078-6648-4468-afe9-8401c4df1ba7, allocator=41f6235a-0b82-4567-8a47-c7885387adda
+m.i.t.services.DefaultWorkProcessor      : Starting work on id=fb555078-6648-4468-afe9-8401c4df1ba7, content=testing=four
 ```
 
 Using `etcdctl get --endpoints http://localhost:2479 --prefix /work/` we can also confirm the 
 state of etcd after the work allocations (line space added for clarity):
 ```text
-/work/active/13de78a9-a1e4-4e9f-9d71-49cb368240fe
-81ffc456-79e4-4273-a684-3d3dc473f139
-/work/active/9994249a-0ecb-4735-b078-19ce5c4ee20c
-81ffc456-79e4-4273-a684-3d3dc473f139
-/work/active/c6574ad8-7a3f-48e2-8c33-7fdedef6d20e
-81ffc456-79e4-4273-a684-3d3dc473f139
-/work/active/dff30574-fca6-45a0-a0dd-db36142b1e8e
-81ffc456-79e4-4273-a684-3d3dc473f139
+/work/active/2678cda4-5443-48c2-9b8e-6d682ec4959a
+41f6235a-0b82-4567-8a47-c7885387adda
+/work/active/7bbfeb10-e644-417e-acd2-7edbfca26d89
+41f6235a-0b82-4567-8a47-c7885387adda
+/work/active/fb555078-6648-4468-afe9-8401c4df1ba7
+41f6235a-0b82-4567-8a47-c7885387adda
+/work/active/fcd8a04d-5698-40f2-b4d9-a6714b15aa5b
+41f6235a-0b82-4567-8a47-c7885387adda
 
-/work/registry/13de78a9-a1e4-4e9f-9d71-49cb368240fe
-testing=two
-/work/registry/9994249a-0ecb-4735-b078-19ce5c4ee20c
-testing=one
-/work/registry/c6574ad8-7a3f-48e2-8c33-7fdedef6d20e
+/work/registry/2678cda4-5443-48c2-9b8e-6d682ec4959a
 testing=three
-/work/registry/dff30574-fca6-45a0-a0dd-db36142b1e8e
+/work/registry/7bbfeb10-e644-417e-acd2-7edbfca26d89
+testing=one
+/work/registry/fb555078-6648-4468-afe9-8401c4df1ba7
 testing=four
+/work/registry/fcd8a04d-5698-40f2-b4d9-a6714b15aa5b
+testing=two
 
-/work/workers/81ffc456-79e4-4273-a684-3d3dc473f139
+/work/workers/41f6235a-0b82-4567-8a47-c7885387adda
 0000000004
 ```
 
@@ -116,29 +108,15 @@ work load to ensure the second and then third allocators/workers have their fair
 
 Looking at the first allocator's logs:
 ```text
-m.i.t.services.WorkAllocator             : Saw new worker=8b1da48a-7088-498a-9ae6-6245cdc870b1
-m.i.t.services.WorkAllocator             : Rebalancing work load
-m.i.t.services.WorkAllocator             : Shedding work to rebalance count=2
-m.i.t.services.WorkAllocator             : Releasing work=dff30574-fca6-45a0-a0dd-db36142b1e8e
-m.i.t.services.WorkAllocator             : Releasing work=c6574ad8-7a3f-48e2-8c33-7fdedef6d20e
-m.i.t.services.DefaultWorkProcessor      : Stopping work on id=dff30574-fca6-45a0-a0dd-db36142b1e8e, content=testing=four
-m.i.t.services.DefaultWorkProcessor      : Stopping work on id=c6574ad8-7a3f-48e2-8c33-7fdedef6d20e, content=testing=three
-m.i.t.services.WorkAllocator             : Handling potential readyWork=dff30574-fca6-45a0-a0dd-db36142b1e8e at transition=RELEASED
-m.i.t.services.WorkAllocator             : Handling potential readyWork=c6574ad8-7a3f-48e2-8c33-7fdedef6d20e at transition=RELEASED
-m.i.t.services.WorkAllocator             : Stored workLoad=2 update
-m.i.t.services.WorkAllocator             : Stored workLoad=3 update
-m.i.t.services.WorkAllocator             : I am leastLoaded=false out of workerCount=2
-m.i.t.services.WorkAllocator             : I am leastLoaded=false out of workerCount=2
-m.i.t.services.WorkAllocator             : Saw new worker=fa69632a-023b-44db-93a8-173994fe936a
-m.i.t.services.WorkAllocator             : Rebalancing work load
-m.i.t.services.WorkAllocator             : Shedding work to rebalance count=1
-m.i.t.services.WorkAllocator             : Releasing work=13de78a9-a1e4-4e9f-9d71-49cb368240fe
-m.i.t.services.DefaultWorkProcessor      : Stopping work on id=13de78a9-a1e4-4e9f-9d71-49cb368240fe, content=testing=two
-m.i.t.services.WorkAllocator             : Handling potential readyWork=13de78a9-a1e4-4e9f-9d71-49cb368240fe at transition=RELEASED
-m.i.t.services.WorkAllocator             : Stored workLoad=1 update
-m.i.t.services.WorkAllocator             : I am leastLoaded=false out of workerCount=3
-m.i.t.services.WorkAllocator             : Handling potential readyWork=c6574ad8-7a3f-48e2-8c33-7fdedef6d20e at transition=RELEASED
-m.i.t.services.WorkAllocator             : I am leastLoaded=false out of workerCount=3
+2018-11-20 15:19:18.095  INFO 87001 --- [     watchers-3] m.i.t.services.WorkAllocator             : Saw new worker=22b2ff48-8a34-4d3d-ab31-c05c9eb121fe
+2018-11-20 15:19:19.105  INFO 87001 --- [pool-1-thread-5] m.i.t.services.WorkAllocator             : Rebalancing workLoad=4 to target=2
+2018-11-20 15:19:19.105  INFO 87001 --- [pool-1-thread-5] m.i.t.services.WorkAllocator             : Shedding work to rebalance count=2
+2018-11-20 15:19:19.105  INFO 87001 --- [pool-1-thread-5] m.i.t.services.WorkAllocator             : Releasing work=fcd8a04d-5698-40f2-b4d9-a6714b15aa5b
+2018-11-20 15:19:19.113  INFO 87001 --- [pool-1-thread-5] m.i.t.services.WorkAllocator             : Releasing work=fb555078-6648-4468-afe9-8401c4df1ba7
+2018-11-20 15:19:19.113  INFO 87001 --- [     watchers-2] m.i.t.services.WorkAllocator             : Observed readyWork=fcd8a04d-5698-40f2-b4d9-a6714b15aa5b cause=RELEASED rev=2041 allocator=d8298d82-b624-4e16-8caf-3208c3ab5193
+2018-11-20 15:19:19.122  INFO 87001 --- [pool-1-thread-2] m.i.t.services.DefaultWorkProcessor      : Stopping work on id=fcd8a04d-5698-40f2-b4d9-a6714b15aa5b, content=testing=two
+2018-11-20 15:19:19.123  INFO 87001 --- [     watchers-2] m.i.t.services.WorkAllocator             : Observed readyWork=fb555078-6648-4468-afe9-8401c4df1ba7 cause=RELEASED rev=2042 allocator=d8298d82-b624-4e16-8caf-3208c3ab5193
+2018-11-20 15:19:19.127  INFO 87001 --- [pool-1-thread-2] m.i.t.services.DefaultWorkProcessor      : Stopping work on id=fb555078-6648-4468-afe9-8401c4df1ba7, content=testing=four
 ```
 
 Keep in mind there was some churn as the third allocator entered the system.

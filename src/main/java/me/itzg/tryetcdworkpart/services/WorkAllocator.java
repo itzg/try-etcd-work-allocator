@@ -314,6 +314,7 @@ public class WorkAllocator implements SmartLifecycle {
       log.info("Stopping our work={}", workId);
 
       try {
+    workChangeSem.acquire();
         releaseWork(workId, kv.getValue().toStringUtf8());
       } catch (InterruptedException e) {
         log.warn("Interrupted while releasing registered work={}", workId);
@@ -366,11 +367,12 @@ public class WorkAllocator implements SmartLifecycle {
 
               // give preference to shedding most recently assigned work items with the theory
               // that we'll minimize churn of long held work items
-              final String workIdToShed = ourWork.peekFirst();
               try {
+    workChangeSem.acquire();
+              final String workIdToShed = ourWork.peekFirst();
                 releaseWork(workIdToShed, null);
               } catch (InterruptedException e) {
-                log.warn("Interrupted while releasing work={}", workIdToShed);
+     //           log.warn("Interrupted while releasing work={}", workIdToShed);
               }
             }
           }
@@ -388,7 +390,6 @@ public class WorkAllocator implements SmartLifecycle {
 
   private CompletableFuture<Boolean> releaseWork(String workId, String releasedContent)
       throws InterruptedException {
-    workChangeSem.acquire();
 
     // optimistic decrease
     final int newWorkLoad = workLoad.decrementAndGet();
@@ -503,7 +504,7 @@ public class WorkAllocator implements SmartLifecycle {
         )
         .commit()
         .handle((txnResponse, throwable) -> {
-          log.debug("Result of grab txn = {}", txnResponse);
+          log.info("Result of grab txn = {}", txnResponse);
           Boolean retval = true;
           if (throwable != null) {
             log.warn("Failure while committing work grab of {}", workId, throwable);
@@ -602,7 +603,7 @@ public class WorkAllocator implements SmartLifecycle {
           final KeyValue kv = getResponse.getKvs().get(0);
           final String leastLoadedId = Bits.extractIdFromKey(kv);
           final boolean leastLoaded = ourId.equals(leastLoadedId);
-          log.debug(
+          log.info(
               "I am leastLoaded={} out of workerCount={}",
               leastLoaded, getResponse.getCount()
           );

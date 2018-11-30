@@ -366,7 +366,7 @@ public class WorkAllocator implements SmartLifecycle {
 
               // give preference to shedding most recently assigned work items with the theory
               // that we'll minimize churn of long held work items
-              final String workIdToShed = ourWork.pop();
+              final String workIdToShed = ourWork.peekFirst();
               try {
                 releaseWork(workIdToShed, null);
               } catch (InterruptedException e) {
@@ -415,25 +415,21 @@ public class WorkAllocator implements SmartLifecycle {
         )
         .commit()
         .handle((txnResponse, throwable) -> {
-          workChangeSem.release();
-
-          // regardless of issues, we should err on the side of having our processor stop
-          processStoppedWork(workId, releasedContent);
-
+          Boolean retval = true;
           if (throwable != null) {
             log.warn("Failure while releasing work={}", workId, throwable);
-
-            // NOTE: at this point the stored work load in our stored active key doesn't match
-            // workLoad's value; however, the next successful operation will write the proper
-            // value.
-
-            return false;
+            workLoad.incrementAndGet();
+            retval = false;
           } else if (!txnResponse.isSucceeded()) {
             log.warn("Transaction failed during release of work={}", workId);
-            // same NOTE as previous block
-            return false;
+            workLoad.incrementAndGet();
+            retval = false;
+          } else {
+            processStoppedWork(workId, releasedContent);
+            ourWork.remove(workId);
           }
-          return true;
+          workChangeSem.release();
+          return retval;
         });
   }
 
@@ -508,22 +504,26 @@ public class WorkAllocator implements SmartLifecycle {
         .commit()
         .handle((txnResponse, throwable) -> {
           log.debug("Result of grab txn = {}", txnResponse);
-          workChangeSem.release();
-
+          Boolean retval = true;
           if (throwable != null) {
             log.warn("Failure while committing work grab of {}", workId, throwable);
-            return false;
+            workLoad.decrementAndGet();
+            retval = false;
           }
 
           if (txnResponse.isSucceeded()) {
             log.info("Successfully grabbed work={}, allocator={}", workId, ourId);
-            return true;
+            ourWork.push(workId);
           } else {
             // NOTE: at this point the stored work load in our stored active key doesn't match
             // workLoad's value; however, the next successful operation will write the proper
             // value.
-            return false;
+            log.warn("Transaction failed {}", workId, ourId);
+            workLoad.decrementAndGet();
+            retval = false;
           }
+          workChangeSem.release();
+          return retval;
         })
         .thenCompose(success -> {
           if (success) {
@@ -550,7 +550,6 @@ public class WorkAllocator implements SmartLifecycle {
   }
 
   private void processGrabbedWork(String workId, String content) {
-    ourWork.push(workId);
     processor.start(workId, content);
   }
 

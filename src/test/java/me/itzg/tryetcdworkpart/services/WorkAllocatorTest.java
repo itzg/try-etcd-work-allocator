@@ -243,9 +243,10 @@ public class WorkAllocatorTest {
       workProcessor2.hasActiveWorkItems(2, 1000);
     }
     finally {
+      log.info("stopping allocators");
       workAllocator1.stop();
       workAllocator2.stop();
-      workAllocator3.start();
+      workAllocator3.stop();
     }
   }
 
@@ -450,9 +451,14 @@ public class WorkAllocatorTest {
     }
 
     public void hasEnoughStarts(int expectedWorkItems, long timeout) throws InterruptedException {
+      final long start = System.currentTimeMillis();
+
       lock.lock();
       try {
         while (observedStarts.size() < expectedWorkItems) {
+          if (System.currentTimeMillis() - start > timeout) {
+            Assert.fail(String.format("failed to see %d in time, had %d", expectedWorkItems, observedStarts.size()));
+          }
           hasEnoughStarts.await(timeout, TimeUnit.MILLISECONDS);
         }
       } finally {
@@ -481,7 +487,7 @@ public class WorkAllocatorTest {
       try {
         while (activeWorkItems < expected) {
           if (System.currentTimeMillis() - start > timeout) {
-            Assert.fail(String.format("hasActiveWorkItems failed to see in time %d, had %d", expected, activeWorkItems));
+            Assert.fail(String.format("failed to see %d in time, had %d", expected, activeWorkItems));
           }
           activeItemsCondition.await(timeout, TimeUnit.MILLISECONDS);
         }

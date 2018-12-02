@@ -14,6 +14,7 @@ import static me.itzg.tryetcdworkpart.Bits.isNewKeyEvent;
 import static me.itzg.tryetcdworkpart.Bits.isUpdateKeyEvent;
 
 import com.coreos.jetcd.Client;
+import com.coreos.jetcd.Lease.KeepAliveListener;
 import com.coreos.jetcd.Watch.Watcher;
 import com.coreos.jetcd.common.exception.ClosedClientException;
 import com.coreos.jetcd.data.ByteSequence;
@@ -67,6 +68,7 @@ public class WorkAllocator implements SmartLifecycle {
   private Deque<String> ourWork = new ConcurrentLinkedDeque<>();
   private ScheduledFuture<?> schedule;
   private ScheduledFuture<?> scheduledRebalance;
+  private KeepAliveListener keepAliveListener;
 
   @Autowired
   public WorkAllocator(WorkerProperties properties, Client etcd, WorkProcessor processor,
@@ -96,7 +98,7 @@ public class WorkAllocator implements SmartLifecycle {
   @Override
   public void start() {
     ourId = UUID.randomUUID().toString();
-    log.info("I am worker={}", ourId);
+    log.info("Staring WorkAllocator ourId={}", ourId);
 
     running = true;
 
@@ -104,8 +106,8 @@ public class WorkAllocator implements SmartLifecycle {
         .grant(properties.getLeaseDuration().getSeconds())
         .thenApply(leaseGrantResponse -> {
           leaseId = leaseGrantResponse.getID();
-          log.info("Got lease={}", ourId, leaseId);
-          etcd.getLeaseClient().keepAlive(leaseId);
+          log.info("Got lease={}, ourId={}", leaseId, ourId);
+          keepAliveListener = etcd.getLeaseClient().keepAlive(leaseId);
           return leaseId;
         })
         .thenCompose(leaseId ->
@@ -132,6 +134,10 @@ public class WorkAllocator implements SmartLifecycle {
       callback.run();
       return;
     }
+
+    log.info("Stopping WorkAllocator ourId={}", ourId);
+
+    keepAliveListener.close();
 
     running = false;
     if (scheduledRebalance != null) {
@@ -457,7 +463,7 @@ public class WorkAllocator implements SmartLifecycle {
     amILeastLoaded(revision)
         .thenAccept(leastLoaded -> {
           if (leastLoaded) {
-            log.info("Least loaded, so trying to grab work={}, allocator={}", workId, ourId);
+            log.info("Least loaded, so trying to grab work={}, ourId={}", workId, ourId);
             // NOTE: we can't pass the value from kv here since we might have only seen
             // an active entry deletion where all we know is workId
             try {
@@ -519,7 +525,7 @@ public class WorkAllocator implements SmartLifecycle {
             // NOTE: at this point the stored work load in our stored active key doesn't match
             // workLoad's value; however, the next successful operation will write the proper
             // value.
-            log.warn("Transaction failed {}", workId, ourId);
+            log.debug("Transaction to grab work failed {}", workId, ourId);
             workLoad.decrementAndGet();
             retval = false;
           }
@@ -594,7 +600,7 @@ public class WorkAllocator implements SmartLifecycle {
         )
         .thenApply(getResponse -> {
           if (getResponse.getCount() <= 1) {
-            log.debug("I'm the only worker");
+            log.debug("Skipping least-loaded evaluation since I'm the only worker");
             // it's only us, so we're it
             return true;
           }
@@ -604,7 +610,7 @@ public class WorkAllocator implements SmartLifecycle {
           final String leastLoadedId = Bits.extractIdFromKey(kv);
           final boolean leastLoaded = ourId.equals(leastLoadedId);
           log.info(
-              "I am leastLoaded={} out of workerCount={}",
+              "Evaluated leastLoaded={} out of workerCount={}",
               leastLoaded, getResponse.getCount()
           );
           return leastLoaded;

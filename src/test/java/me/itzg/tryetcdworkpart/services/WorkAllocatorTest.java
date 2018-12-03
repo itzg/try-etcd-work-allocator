@@ -48,6 +48,8 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 @Slf4j
 public class WorkAllocatorTest {
 
+  private static final int TIMEOUT = 5000;
+
   @Rule
   public final EtcdClusterResource etcd = new EtcdClusterResource("test-etcd", 1);
 
@@ -109,7 +111,7 @@ public class WorkAllocatorTest {
     workAllocator.createWork("1")
     .join();
 
-    workProcessor.hasActiveWorkItems(1, 1000);
+    workProcessor.hasActiveWorkItems(1, TIMEOUT);
   }
 
   @Test
@@ -190,11 +192,11 @@ public class WorkAllocatorTest {
     }
 
     workAllocator1.start();
-    workProcessor1.hasActiveWorkItems(totalWorkItems, 1000);
+    workProcessor1.hasActiveWorkItems(totalWorkItems, TIMEOUT);
 
     workAllocator2.start();
-    workProcessor1.hasActiveWorkItems(totalWorkItems/2, 1000);
-    workProcessor2.hasActiveWorkItems(totalWorkItems/2, 1000);
+    workProcessor1.hasActiveWorkItems(totalWorkItems/2, TIMEOUT);
+    workProcessor2.hasActiveWorkItems(totalWorkItems/2, TIMEOUT);
 
   }
 
@@ -237,12 +239,12 @@ public class WorkAllocatorTest {
     }
 
     workAllocator1.start();
-    workProcessor1.hasActiveWorkItems(totalWorkItems, 1000);
+    workProcessor1.hasActiveWorkItems(totalWorkItems, TIMEOUT);
 
     log.info("starting second allocator");
     workAllocator2.start();
-    workProcessor1.hasActiveWorkItems(totalWorkItems/2, 1000);
-    workProcessor2.hasActiveWorkItems(totalWorkItems/2, 1000);
+    workProcessor1.hasActiveWorkItems(totalWorkItems/2, TIMEOUT);
+    workProcessor2.hasActiveWorkItems(totalWorkItems/2, TIMEOUT);
 
     log.info("starting third allocator");
     workAllocator3.start();
@@ -250,17 +252,17 @@ public class WorkAllocatorTest {
     Thread.sleep(600);
     // The expected balancing looks uneven here, but it's because the work load has a rounding-up
     // tolerance to avoid the one work item, in this case, from flip-flopping between the allocators
-    workProcessor1.hasActiveWorkItems(2, 1000);
-    workProcessor2.hasActiveWorkItems(2, 1000);
-    workProcessor3.hasActiveWorkItems(0, 1000);
+    workProcessor1.hasActiveWorkItems(2, TIMEOUT);
+    workProcessor2.hasActiveWorkItems(2, TIMEOUT);
+    workProcessor3.hasActiveWorkItems(0, TIMEOUT);
 
     log.info("adding new work for third to pickup");
     createdWork.add(
         workAllocator1.createWork(String.format("%d", totalWorkItems+1)).get()
     );
-    workProcessor3.hasActiveWorkItems(1, 1000);
-    workProcessor1.hasActiveWorkItems(2, 1000);
-    workProcessor2.hasActiveWorkItems(2, 1000);
+    workProcessor3.hasActiveWorkItems(1, TIMEOUT);
+    workProcessor1.hasActiveWorkItems(2, TIMEOUT);
+    workProcessor2.hasActiveWorkItems(2, TIMEOUT);
   }
 
   @Test
@@ -293,8 +295,8 @@ public class WorkAllocatorTest {
     }
 
     // first verify even load across the two
-    workProcessor1.hasActiveWorkItems(totalWorkItems/2, 1000);
-    workProcessor2.hasActiveWorkItems(totalWorkItems/2, 1000);
+    workProcessor1.hasActiveWorkItems(totalWorkItems/2, TIMEOUT);
+    workProcessor2.hasActiveWorkItems(totalWorkItems/2, TIMEOUT);
 
     log.info("stopping allocator 2");
     final Semaphore stopped = new Semaphore(0);
@@ -303,8 +305,8 @@ public class WorkAllocatorTest {
     });
 
     stopped.acquire();
-    workProcessor1.hasActiveWorkItems(totalWorkItems, 1000);
-    workProcessor2.hasActiveWorkItems(0, 1000);
+    workProcessor1.hasActiveWorkItems(totalWorkItems, TIMEOUT);
+    workProcessor2.hasActiveWorkItems(0, TIMEOUT);
   }
 
   private void assertWorkLoad(int expected, String workAllocatorId)

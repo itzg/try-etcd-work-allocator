@@ -194,6 +194,7 @@ public class WorkAllocatorTest {
     workAllocator1.start();
     workProcessor1.hasActiveWorkItems(totalWorkItems, TIMEOUT);
 
+    log.info("Starting second worker");
     workAllocator2.start();
     workProcessor1.hasActiveWorkItems(totalWorkItems/2, TIMEOUT);
     workProcessor2.hasActiveWorkItems(totalWorkItems/2, TIMEOUT);

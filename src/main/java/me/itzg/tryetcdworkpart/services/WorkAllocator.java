@@ -98,7 +98,7 @@ public class WorkAllocator implements SmartLifecycle {
   @Override
   public void start() {
     ourId = UUID.randomUUID().toString();
-    log.info("Staring WorkAllocator ourId={}", ourId);
+    log.info("Starting WorkAllocator ourId={}", ourId);
 
     running = true;
 

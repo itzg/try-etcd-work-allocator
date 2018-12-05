@@ -320,7 +320,6 @@ public class WorkAllocator implements SmartLifecycle {
       log.info("Stopping our work={}", workId);
 
       try {
-    workChangeSem.acquire();
         releaseWork(workId, kv.getValue().toStringUtf8());
       } catch (InterruptedException e) {
         log.warn("Interrupted while releasing registered work={}", workId);
@@ -374,11 +373,9 @@ public class WorkAllocator implements SmartLifecycle {
               // give preference to shedding most recently assigned work items with the theory
               // that we'll minimize churn of long held work items
               try {
-    workChangeSem.acquire();
-              final String workIdToShed = ourWork.peekFirst();
-                releaseWork(workIdToShed, null);
+                releaseWork(null, null);
               } catch (InterruptedException e) {
-     //           log.warn("Interrupted while releasing work={}", workIdToShed);
+                log.warn("Interrupted while releasing work");
               }
             }
           }
@@ -397,14 +394,17 @@ public class WorkAllocator implements SmartLifecycle {
   private CompletableFuture<Boolean> releaseWork(String workId, String releasedContent)
       throws InterruptedException {
 
+    workChangeSem.acquire();
+    final String workIdToRelease = (workId == null)? ourWork.peekFirst() : workId;
+
     // optimistic decrease
     final int newWorkLoad = workLoad.decrementAndGet();
 
-    final ByteSequence activeKeyBytes = fromString(prefix + ACTIVE_SET + workId);
+    final ByteSequence activeKeyBytes = fromString(prefix + ACTIVE_SET + workIdToRelease);
     final ByteSequence workLoadBytes = fromFormat(WORK_LOAD_FORMAT, newWorkLoad);
     final ByteSequence ourWorkerKey = fromString(prefix + WORKERS_SET + ourId);
 
-    log.info("Releasing work={}", workId);
+    log.info("Releasing work={}", workIdToRelease);
 
     return etcd.getKVClient().txn()
         .Then(
@@ -424,16 +424,16 @@ public class WorkAllocator implements SmartLifecycle {
         .handle((txnResponse, throwable) -> {
           Boolean retval = true;
           if (throwable != null) {
-            log.warn("Failure while releasing work={}", workId, throwable);
+            log.warn("Failure while releasing work={}", workIdToRelease, throwable);
             workLoad.incrementAndGet();
             retval = false;
           } else if (!txnResponse.isSucceeded()) {
-            log.warn("Transaction failed during release of work={}", workId);
+            log.warn("Transaction failed during release of work={}", workIdToRelease);
             workLoad.incrementAndGet();
             retval = false;
           } else {
-            processStoppedWork(workId, releasedContent);
-            ourWork.remove(workId);
+            processStoppedWork(workIdToRelease, releasedContent);
+            ourWork.remove(workIdToRelease);
           }
           workChangeSem.release();
           return retval;
@@ -522,9 +522,6 @@ public class WorkAllocator implements SmartLifecycle {
             log.info("Successfully grabbed work={}, allocator={}", workId, ourId);
             ourWork.push(workId);
           } else {
-            // NOTE: at this point the stored work load in our stored active key doesn't match
-            // workLoad's value; however, the next successful operation will write the proper
-            // value.
             log.debug("Transaction to grab work failed {}", workId, ourId);
             workLoad.decrementAndGet();
             retval = false;
@@ -609,7 +606,7 @@ public class WorkAllocator implements SmartLifecycle {
           final KeyValue kv = getResponse.getKvs().get(0);
           final String leastLoadedId = Bits.extractIdFromKey(kv);
           final boolean leastLoaded = ourId.equals(leastLoadedId);
-          log.info(
+          log.debug(
               "Evaluated leastLoaded={} out of workerCount={}",
               leastLoaded, getResponse.getCount()
           );

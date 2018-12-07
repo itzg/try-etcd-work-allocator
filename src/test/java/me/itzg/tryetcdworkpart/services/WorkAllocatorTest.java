@@ -48,6 +48,8 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 @Slf4j
 public class WorkAllocatorTest {
 
+  private static final int TIMEOUT = 5000;
+
   @Rule
   public final EtcdClusterResource etcd = new EtcdClusterResource("test-etcd", 1);
 
@@ -57,6 +59,8 @@ public class WorkAllocatorTest {
   private ThreadPoolTaskScheduler taskExecutor;
   private WorkerProperties workerProperties;
   private Client client;
+
+  private List<WorkAllocator> workAllocatorsInTest;
 
   @Before
   public void setUp() throws Exception {
@@ -72,25 +76,42 @@ public class WorkAllocatorTest {
         .map(URI::toString)
         .collect(Collectors.toList());
     client = Client.builder().endpoints(endpoints).build();
+
+    workAllocatorsInTest = new ArrayList<>();
   }
 
   @After
   public void tearDown() throws Exception {
-    taskExecutor.shutdown();
-    client.close();
+    log.info("Stopping work allocators");
+    final Semaphore stopSem = new Semaphore(0);
+
+    workAllocatorsInTest.forEach(workAllocator -> workAllocator.stop(() -> stopSem.release()));
+    try {
+      stopSem.tryAcquire(workAllocatorsInTest.size(), 5, TimeUnit.SECONDS);
+    } finally {
+      taskExecutor.shutdown();
+      client.close();
+    }
+  }
+
+  private WorkAllocator register(WorkAllocator workAllocator) {
+    workAllocatorsInTest.add(workAllocator);
+    return workAllocator;
   }
 
   @Test
   public void testSingleWorkItemSingleWorker() throws InterruptedException {
     final BulkWorkProcessor workProcessor = new BulkWorkProcessor(1);
-    final WorkAllocator workAllocator = new WorkAllocator(
-        workerProperties, client, workProcessor, taskExecutor);
+    final WorkAllocator workAllocator = register(
+        new WorkAllocator(
+        workerProperties, client, workProcessor, taskExecutor)
+    );
     workAllocator.start();
 
     workAllocator.createWork("1")
     .join();
 
-    workProcessor.hasActiveWorkItems(1, 1000);
+    workProcessor.hasActiveWorkItems(1, TIMEOUT);
   }
 
   @Test
@@ -99,8 +120,10 @@ public class WorkAllocatorTest {
 
     final BulkWorkProcessor bulkWorkProcessor = new BulkWorkProcessor(totalWorkItems);
 
-    final WorkAllocator workAllocator = new WorkAllocator(
-        workerProperties, client, bulkWorkProcessor, taskExecutor);
+    final WorkAllocator workAllocator = register(
+        new WorkAllocator(
+        workerProperties, client, bulkWorkProcessor, taskExecutor)
+    );
 
     for (int i = 0; i < totalWorkItems; i++) {
       workAllocator.createWork(String.format("%d", i));
@@ -108,13 +131,9 @@ public class WorkAllocatorTest {
 
     workAllocator.start();
 
-    try {
-      bulkWorkProcessor.hasActiveWorkItems(totalWorkItems, 2000);
+    bulkWorkProcessor.hasActiveWorkItems(totalWorkItems, 2000);
 
-      assertWorkLoad(totalWorkItems, workAllocator.getId());
-    } finally {
-      workAllocator.stop();
-    }
+    assertWorkLoad(totalWorkItems, workAllocator.getId());
   }
 
   @Test
@@ -123,8 +142,10 @@ public class WorkAllocatorTest {
 
     final BulkWorkProcessor bulkWorkProcessor = new BulkWorkProcessor(totalWorkItems);
 
-    final WorkAllocator workAllocator = new WorkAllocator(
-        workerProperties, client, bulkWorkProcessor, taskExecutor);
+    final WorkAllocator workAllocator = register(
+        new WorkAllocator(
+        workerProperties, client, bulkWorkProcessor, taskExecutor)
+    );
 
     final List<Work> createdWork = new ArrayList<>();
     for (int i = 0; i < totalWorkItems; i++) {
@@ -135,17 +156,13 @@ public class WorkAllocatorTest {
 
     workAllocator.start();
 
-    try {
-      bulkWorkProcessor.hasActiveWorkItems(totalWorkItems, 2000);
-      assertWorkLoad(totalWorkItems, workAllocator.getId());
+    bulkWorkProcessor.hasActiveWorkItems(totalWorkItems, 2000);
+    assertWorkLoad(totalWorkItems, workAllocator.getId());
 
-      workAllocator.deleteWork(createdWork.get(0).getId());
-      bulkWorkProcessor.hasActiveWorkItems(totalWorkItems-1, 2000);
-      assertWorkLoad(totalWorkItems-1, workAllocator.getId());
+    workAllocator.deleteWork(createdWork.get(0).getId());
+    bulkWorkProcessor.hasActiveWorkItems(totalWorkItems-1, 2000);
+    assertWorkLoad(totalWorkItems-1, workAllocator.getId());
 
-    } finally {
-      workAllocator.stop();
-    }
   }
 
   @Test
@@ -156,33 +173,32 @@ public class WorkAllocatorTest {
     workerProperties.setRebalanceDelay(Duration.ofMillis(500));
 
     final BulkWorkProcessor workProcessor1 = new BulkWorkProcessor(totalWorkItems);
-    final WorkAllocator workAllocator1 = new WorkAllocator(
-        workerProperties, client, workProcessor1, taskExecutor);
+    final WorkAllocator workAllocator1 = register(
+        new WorkAllocator(
+        workerProperties, client, workProcessor1, taskExecutor)
+    );
 
     final BulkWorkProcessor workProcessor2 = new BulkWorkProcessor(totalWorkItems);
-    final WorkAllocator workAllocator2 = new WorkAllocator(
-        workerProperties, client, workProcessor2, taskExecutor);
+    final WorkAllocator workAllocator2 = register(
+        new WorkAllocator(
+        workerProperties, client, workProcessor2, taskExecutor)
+    );
 
-    try {
-      final List<Work> createdWork = new ArrayList<>();
-      for (int i = 0; i < totalWorkItems; i++) {
-        createdWork.add(
-            workAllocator1.createWork(String.format("%d", i)).get()
-        );
-      }
-
-      workAllocator1.start();
-      workProcessor1.hasActiveWorkItems(totalWorkItems, 1000);
-
-      workAllocator2.start();
-      workProcessor1.hasActiveWorkItems(totalWorkItems/2, 1000);
-      workProcessor2.hasActiveWorkItems(totalWorkItems/2, 1000);
-
+    final List<Work> createdWork = new ArrayList<>();
+    for (int i = 0; i < totalWorkItems; i++) {
+      createdWork.add(
+          workAllocator1.createWork(String.format("%d", i)).get()
+      );
     }
-    finally {
-      workAllocator1.stop();
-      workAllocator2.stop();
-    }
+
+    workAllocator1.start();
+    workProcessor1.hasActiveWorkItems(totalWorkItems, TIMEOUT);
+
+    log.info("Starting second worker");
+    workAllocator2.start();
+    workProcessor1.hasActiveWorkItems(totalWorkItems/2, TIMEOUT);
+    workProcessor2.hasActiveWorkItems(totalWorkItems/2, TIMEOUT);
+
   }
 
   @Test
@@ -193,60 +209,61 @@ public class WorkAllocatorTest {
     workerProperties.setRebalanceDelay(Duration.ofMillis(500));
 
     final BulkWorkProcessor workProcessor1 = new BulkWorkProcessor(totalWorkItems);
-    final WorkAllocator workAllocator1 = new WorkAllocator(
-        workerProperties, client, workProcessor1, taskExecutor);
+    final WorkAllocator workAllocator1 = register(
+        new WorkAllocator(
+        workerProperties, client, workProcessor1, taskExecutor)
+    );
 
     final BulkWorkProcessor workProcessor2 = new BulkWorkProcessor(totalWorkItems);
-    final WorkAllocator workAllocator2 = new WorkAllocator(
-        workerProperties, client, workProcessor2, taskExecutor);
+    final WorkAllocator workAllocator2 = register(
+        new WorkAllocator(
+        workerProperties, client, workProcessor2, taskExecutor)
+    );
 
     final BulkWorkProcessor workProcessor3 = new BulkWorkProcessor(totalWorkItems);
-    final WorkAllocator workAllocator3 = new WorkAllocator(
-        workerProperties, client, workProcessor3, taskExecutor);
+    final WorkAllocator workAllocator3 = register(
+        new WorkAllocator(
+        workerProperties, client, workProcessor3, taskExecutor)
+    );
 
     final BulkWorkProcessor workProcessor4 = new BulkWorkProcessor(totalWorkItems);
-    final WorkAllocator workAllocator4 = new WorkAllocator(
-        workerProperties, client, workProcessor4, taskExecutor);
+    final WorkAllocator workAllocator4 = register(
+        new WorkAllocator(
+        workerProperties, client, workProcessor4, taskExecutor)
+    );
 
-    try {
-      final List<Work> createdWork = new ArrayList<>();
-      for (int i = 0; i < totalWorkItems; i++) {
-        createdWork.add(
-            workAllocator1.createWork(String.format("%d", i)).get()
-        );
-      }
-
-      workAllocator1.start();
-      workProcessor1.hasActiveWorkItems(totalWorkItems, 1000);
-
-      log.info("starting second allocator");
-      workAllocator2.start();
-      workProcessor1.hasActiveWorkItems(totalWorkItems/2, 1000);
-      workProcessor2.hasActiveWorkItems(totalWorkItems/2, 1000);
-
-      log.info("starting third allocator");
-      workAllocator3.start();
-      // wait past rebalance to ensure load balance of 1.3333 is rounded to 2
-      Thread.sleep(600);
-      // The expected balancing looks uneven here, but it's because the work load has a rounding-up
-      // tolerance to avoid the one work item, in this case, from flip-flopping between the allocators
-      workProcessor1.hasActiveWorkItems(2, 1000);
-      workProcessor2.hasActiveWorkItems(2, 1000);
-      workProcessor3.hasActiveWorkItems(0, 1000);
-
-      log.info("adding new work for third to pickup");
+    final List<Work> createdWork = new ArrayList<>();
+    for (int i = 0; i < totalWorkItems; i++) {
       createdWork.add(
-          workAllocator1.createWork(String.format("%d", totalWorkItems+1)).get()
+          workAllocator1.createWork(String.format("%d", i)).get()
       );
-      workProcessor3.hasActiveWorkItems(1, 1000);
-      workProcessor1.hasActiveWorkItems(2, 1000);
-      workProcessor2.hasActiveWorkItems(2, 1000);
     }
-    finally {
-      workAllocator1.stop();
-      workAllocator2.stop();
-      workAllocator3.start();
-    }
+
+    workAllocator1.start();
+    workProcessor1.hasActiveWorkItems(totalWorkItems, TIMEOUT);
+
+    log.info("starting second allocator");
+    workAllocator2.start();
+    workProcessor1.hasActiveWorkItems(totalWorkItems/2, TIMEOUT);
+    workProcessor2.hasActiveWorkItems(totalWorkItems/2, TIMEOUT);
+
+    log.info("starting third allocator");
+    workAllocator3.start();
+    // wait past rebalance to ensure load balance of 1.3333 is rounded to 2
+    Thread.sleep(600);
+    // The expected balancing looks uneven here, but it's because the work load has a rounding-up
+    // tolerance to avoid the one work item, in this case, from flip-flopping between the allocators
+    workProcessor1.hasActiveWorkItems(2, TIMEOUT);
+    workProcessor2.hasActiveWorkItems(2, TIMEOUT);
+    workProcessor3.hasActiveWorkItems(0, TIMEOUT);
+
+    log.info("adding new work for third to pickup");
+    createdWork.add(
+        workAllocator1.createWork(String.format("%d", totalWorkItems+1)).get()
+    );
+    workProcessor3.hasActiveWorkItems(1, TIMEOUT);
+    workProcessor1.hasActiveWorkItems(2, TIMEOUT);
+    workProcessor2.hasActiveWorkItems(2, TIMEOUT);
   }
 
   @Test
@@ -256,43 +273,41 @@ public class WorkAllocatorTest {
     workerProperties.setRebalanceDelay(Duration.ofMillis(500));
 
     final BulkWorkProcessor workProcessor1 = new BulkWorkProcessor(totalWorkItems);
-    final WorkAllocator workAllocator1 = new WorkAllocator(
-        workerProperties, client, workProcessor1, taskExecutor);
+    final WorkAllocator workAllocator1 = register(
+        new WorkAllocator(
+        workerProperties, client, workProcessor1, taskExecutor)
+    );
     workAllocator1.start();
 
     final BulkWorkProcessor workProcessor2 = new BulkWorkProcessor(totalWorkItems);
-    final WorkAllocator workAllocator2 = new WorkAllocator(
-        workerProperties, client, workProcessor2, taskExecutor);
+    final WorkAllocator workAllocator2 = register(
+        new WorkAllocator(
+        workerProperties, client, workProcessor2, taskExecutor)
+    );
     workAllocator2.start();
 
     // both are started and ready to accept newly created worked items
 
-    try {
-      final List<Work> createdWork = new ArrayList<>();
-      for (int i = 0; i < totalWorkItems; i++) {
-        createdWork.add(
-            workAllocator1.createWork(String.format("%d", i)).get()
-        );
-      }
-
-      // first verify even load across the two
-      workProcessor1.hasActiveWorkItems(totalWorkItems/2, 1000);
-      workProcessor2.hasActiveWorkItems(totalWorkItems/2, 1000);
-
-      log.info("stopping allocator 2");
-      final Semaphore stopped = new Semaphore(0);
-      workAllocator2.stop(() -> {
-        stopped.release();
-      });
-
-      stopped.acquire();
-      workProcessor1.hasActiveWorkItems(totalWorkItems, 1000);
-      workProcessor2.hasActiveWorkItems(0, 1000);
+    final List<Work> createdWork = new ArrayList<>();
+    for (int i = 0; i < totalWorkItems; i++) {
+      createdWork.add(
+          workAllocator1.createWork(String.format("%d", i)).get()
+      );
     }
-    finally {
-      workAllocator1.stop();
-      workAllocator2.stop();
-    }
+
+    // first verify even load across the two
+    workProcessor1.hasActiveWorkItems(totalWorkItems/2, TIMEOUT);
+    workProcessor2.hasActiveWorkItems(totalWorkItems/2, TIMEOUT);
+
+    log.info("stopping allocator 2");
+    final Semaphore stopped = new Semaphore(0);
+    workAllocator2.stop(() -> {
+      stopped.release();
+    });
+
+    stopped.acquire();
+    workProcessor1.hasActiveWorkItems(totalWorkItems, TIMEOUT);
+    workProcessor2.hasActiveWorkItems(0, TIMEOUT);
   }
 
   private void assertWorkLoad(int expected, String workAllocatorId)
@@ -320,7 +335,7 @@ public class WorkAllocatorTest {
     final BulkWorkProcessor bulkWorkProcessor = new BulkWorkProcessor(totalWorkItems);
 
     final List<WorkAllocator> workAllocators = IntStream.range(0, totalWorkers)
-        .mapToObj(index -> new WorkAllocator(workerProperties, client, bulkWorkProcessor, taskExecutor))
+        .mapToObj(index -> register(new WorkAllocator(workerProperties, client, bulkWorkProcessor, taskExecutor)))
         .collect(Collectors.toList());
 
     for (WorkAllocator workAllocator : workAllocators) {
@@ -366,11 +381,6 @@ public class WorkAllocatorTest {
     workItemSummary.workerLoad.forEach((workerId, load) -> {
       log.info("Worker={} has load={}", workerId, load);
     });
-
-    Thread.sleep(1000);
-    for (WorkAllocator workAllocator : workAllocators) {
-      workAllocator.stop();
-    }
   }
 
   @Test
@@ -450,9 +460,14 @@ public class WorkAllocatorTest {
     }
 
     public void hasEnoughStarts(int expectedWorkItems, long timeout) throws InterruptedException {
+      final long start = System.currentTimeMillis();
+
       lock.lock();
       try {
         while (observedStarts.size() < expectedWorkItems) {
+          if (System.currentTimeMillis() - start > timeout) {
+            Assert.fail(String.format("failed to see %d in time, had %d", expectedWorkItems, observedStarts.size()));
+          }
           hasEnoughStarts.await(timeout, TimeUnit.MILLISECONDS);
         }
       } finally {
@@ -481,7 +496,7 @@ public class WorkAllocatorTest {
       try {
         while (activeWorkItems < expected) {
           if (System.currentTimeMillis() - start > timeout) {
-            Assert.fail(String.format("hasActiveWorkItems failed to see in time %d, had %d", expected, activeWorkItems));
+            Assert.fail(String.format("failed to see %d in time, had %d", expected, activeWorkItems));
           }
           activeItemsCondition.await(timeout, TimeUnit.MILLISECONDS);
         }

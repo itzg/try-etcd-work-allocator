@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
 public class WorkerProperties {
 
   @DurationUnit(ChronoUnit.SECONDS)
-  Duration leaseDuration = Duration.ofSeconds(5);
+  Duration leaseDuration = Duration.ofSeconds(30);
 
   @DurationUnit(ChronoUnit.SECONDS)
   Duration rebalanceDelay = Duration.ofSeconds(1);
